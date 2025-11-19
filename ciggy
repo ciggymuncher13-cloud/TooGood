@@ -1,0 +1,446 @@
+-- UNIVERSAL CIGGY – Ultimate CounterBlox GUI
+-- LocalScript in StarterPlayerScripts
+
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ===== State =====
+local settings = {
+    godmode = false,
+    highlight = false,
+    highlightColor = Color3.fromRGB(0,255,0),
+    teamCheck = true,
+    bunnyHop = false,
+    bunnyHopSpeed = 50,  -- Default bunny hop speed
+    lockOn = false,
+    fovCircle = false,
+    lockKey = Enum.UserInputType.MouseButton2, -- right click
+    fovSize = 150,
+    camLerpSpeed = 0.25,
+    theme = Color3.fromRGB(25,25,25)
+}
+
+local target = nil
+local highlights = {}
+local spaceHeld = false
+local lockKeyActive = false
+
+-- ===== Utility Functions =====
+local function isAlive(char)
+    local hum = char:FindFirstChild("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function makeUICorner(inst, radius)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, radius or 8)
+    corner.Parent = inst
+end
+
+local function addHoverEffect(btn, hoverColor)
+    hoverColor = hoverColor or Color3.fromRGB(0,255,0)
+    local originalColor = btn.BackgroundColor3
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = hoverColor}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = originalColor}):Play()
+    end)
+end
+
+-- ===== GUI Setup =====
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "UNIVERSAL_CIGGY"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Open/Close button
+local openBtn = Instance.new("TextButton")
+openBtn.Size = UDim2.new(0, 120, 0, 50)
+openBtn.Position = UDim2.new(0.5, -60, 0, 20)
+openBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+openBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+openBtn.Text = "CIGGY"
+openBtn.Font = Enum.Font.SourceSansBold
+openBtn.TextScaled = true
+openBtn.Parent = screenGui
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 700, 0, 900)
+main.Position = UDim2.new(0.5, -350, 0.5, -450)
+main.BackgroundColor3 = settings.theme
+main.Visible = false
+main.Parent = screenGui
+makeUICorner(main, 16)
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 60)
+titleBar.BackgroundColor3 = Color3.fromRGB(35,35,35)
+titleBar.Parent = main
+makeUICorner(titleBar, 12)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1,0,1,0)
+title.BackgroundTransparency = 1
+title.Text = "UNIVERSAL CIGGY"
+title.TextColor3 = Color3.fromRGB(0,255,0)
+title.Font = Enum.Font.SourceSansBold
+title.TextScaled = true
+title.Parent = titleBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 80, 0, 40)
+closeBtn.Position = UDim2.new(1, -90, 0, 10)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+closeBtn.Text = "Close"
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.Font = Enum.Font.SourceSans
+closeBtn.TextSize = 18
+closeBtn.Parent = titleBar
+makeUICorner(closeBtn,8)
+
+closeBtn.MouseButton1Click:Connect(function()
+    main.Visible = false
+    openBtn.Visible = true
+end)
+
+openBtn.MouseButton1Click:Connect(function()
+    main.Visible = true
+    openBtn.Visible = false
+end)
+
+-- Tab bar
+local tabBar = Instance.new("Frame")
+tabBar.Size = UDim2.new(1, 0, 0, 50)
+tabBar.Position = UDim2.new(0,0,0,60)
+tabBar.BackgroundColor3 = Color3.fromRGB(30,30,30)
+tabBar.Parent = main
+makeUICorner(tabBar,12)
+
+local tabs = {"Basic","Movement","Lock-On","Theme","Highlight Colors"}
+local tabButtons = {}
+local contentFrames = {}
+
+for i, tName in ipairs(tabs) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0,150,0,40)
+    btn.Position = UDim2.new(0,20+(i-1)*160,0,5)
+    btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    btn.Text = tName
+    btn.TextColor3 = Color3.fromRGB(200,200,200)
+    btn.Font = Enum.Font.SourceSansSemibold
+    btn.TextSize = 18
+    btn.Parent = tabBar
+    makeUICorner(btn,8)
+    addHoverEffect(btn)
+    table.insert(tabButtons,btn)
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1,-40,1,-120)
+    frame.Position = UDim2.new(0,20,0,120)
+    frame.BackgroundTransparency = 1
+    frame.Visible = false
+    frame.Parent = main
+    table.insert(contentFrames,frame)
+
+    btn.MouseButton1Click:Connect(function()
+        for j,f in ipairs(contentFrames) do f.Visible = (j==i) end
+        for j,b in ipairs(tabButtons) do
+            b.BackgroundColor3 = (j==i) and Color3.fromRGB(0,180,0) or Color3.fromRGB(50,50,50)
+        end
+    end)
+end
+
+tabButtons[1].BackgroundColor3 = Color3.fromRGB(0,180,0)
+contentFrames[1].Visible = true
+
+-- ===== GUI Element Helpers =====
+local function makeToggle(parent,labelText,stateRef)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0,200,0,40)
+    btn.Position = UDim2.new(0,0,0,#parent:GetChildren()*45)
+    btn.BackgroundColor3 = Color3.fromRGB(70,70,70)
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.Font = Enum.Font.SourceSans
+    btn.TextSize = 18
+    btn.Text = labelText..": OFF"
+    btn.Parent = parent
+    makeUICorner(btn,8)
+    addHoverEffect(btn)
+
+    local state = false
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = labelText..(state and ": ON" or ": OFF")
+        stateRef(state)
+    end)
+end
+
+local function makeSlider(parent,labelText,min,max,initial,callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0,300,0,50)
+    frame.BackgroundTransparency = 1
+    frame.Position = UDim2.new(0,0,0,#parent:GetChildren()*55)
+    frame.Parent = parent
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,0,0,20)
+    lbl.Position = UDim2.new(0,0,0,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = labelText..": "..initial
+    lbl.TextColor3 = Color3.fromRGB(200,200,200)
+    lbl.Font = Enum.Font.SourceSans
+    lbl.TextSize = 16
+    lbl.Parent = frame
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(0,200,0,8)
+    bar.Position = UDim2.new(0,0,0,25)
+    bar.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    bar.Parent = frame
+    makeUICorner(bar,4)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0,12,0,12)
+    knob.BackgroundColor3 = Color3.fromRGB(0,255,0)
+    knob.Position = UDim2.new((initial-min)/(max-min),0,0,-2)
+    knob.Parent = bar
+    makeUICorner(knob,6)
+
+    local dragging = false
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType==Enum.UserInputType.MouseMovement then
+            local rel = math.clamp(input.Position.X - bar.AbsolutePosition.X,0,bar.AbsoluteSize.X)
+            local val = min + (rel/bar.AbsoluteSize.X)*(max-min)
+            callback(val)
+            lbl.Text = labelText..": "..string.format("%.1f",val)
+            knob.Position = UDim2.new(rel/bar.AbsoluteSize.X,0,0,-2)
+        end
+    end)
+    knob.InputEnded:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+    end)
+end
+
+-- ===== Tabs Content =====
+-- Basic
+makeToggle(contentFrames[1],"Godmode",function(v) settings.godmode=v end)
+makeToggle(contentFrames[1],"Highlight",function(v) settings.highlight=v end)
+makeToggle(contentFrames[1],"Team Check",function(v) settings.teamCheck=v end)
+
+-- Movement
+makeToggle(contentFrames[2],"Bunny Hop",function(v) settings.bunnyHop=v end)
+makeSlider(contentFrames[2],"Bunny Hop Speed",30,100,settings.bunnyHopSpeed,function(v) settings.bunnyHopSpeed=v end)
+
+-- Lock-On
+makeToggle(contentFrames[3],"Lock-On",function(v) settings.lockOn=v end)
+makeToggle(contentFrames[3],"Show FOV",function(v) settings.fovCircle=v end)
+makeSlider(contentFrames[3],"FOV Radius",50,500,settings.fovSize,function(v) settings.fovSize=v end)
+makeSlider(contentFrames[3],"Cam Speed",0.05,1,settings.camLerpSpeed,function(v) settings.camLerpSpeed=v end)
+
+-- Theme Tab (GUI)
+local colorValues = {
+    Color3.fromRGB(25,25,25), Color3.fromRGB(230,230,230), Color3.fromRGB(20,40,20), Color3.fromRGB(50,0,50),
+    Color3.fromRGB(0,50,50), Color3.fromRGB(100,50,0), Color3.fromRGB(255,0,0), Color3.fromRGB(0,0,255),
+    Color3.fromRGB(0,255,0), Color3.fromRGB(255,255,0), Color3.fromRGB(255,0,255), Color3.fromRGB(0,255,255)
+}
+for i, c in ipairs(colorValues) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0,60,0,40)
+    btn.Position = UDim2.new(0,(i-1)*65,0,0)
+    btn.BackgroundColor3 = c
+    btn.Text = ""
+    btn.Parent = contentFrames[4]
+    makeUICorner(btn,6)
+    addHoverEffect(btn)
+    btn.MouseButton1Click:Connect(function()
+        main.BackgroundColor3 = c
+        titleBar.BackgroundColor3 = c:lerp(Color3.fromRGB(0,0,0),0.8)
+    end)
+end
+
+-- Highlight Colors
+for i, c in ipairs(colorValues) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0,60,0,40)
+    btn.Position = UDim2.new(0,(i-1)*65,0,0)
+    btn.BackgroundColor3 = c
+    btn.Text = ""
+    btn.Parent = contentFrames[5]
+    makeUICorner(btn,6)
+    addHoverEffect(btn)
+    btn.MouseButton1Click:Connect(function()
+        settings.highlightColor = c
+        for _, hl in pairs(highlights) do
+            hl.FillColor = c
+            hl.OutlineColor = c
+        end
+    end)
+end
+
+-- ===== FOV Circle =====
+local fovFrame = Instance.new("Frame")
+fovFrame.Size = UDim2.new(0, settings.fovSize*2,0,settings.fovSize*2)
+fovFrame.AnchorPoint = Vector2.new(0.5,0.5)
+fovFrame.Position = UDim2.new(0.5,0,0.5,0)
+fovFrame.BackgroundTransparency = 1
+fovFrame.BorderSizePixel = 3
+fovFrame.BorderColor3 = settings.highlightColor
+fovFrame.Visible = false
+fovFrame.Parent = screenGui
+makeUICorner(fovFrame,settings.fovSize)
+
+local pulse = 1
+local pulseDir = 1
+
+-- ===== Game Logic =====
+-- Godmode
+RunService.RenderStepped:Connect(function()
+    if settings.godmode then
+        local chr = LocalPlayer.Character
+        if isAlive(chr) then
+            chr.Humanoid.Health = chr.Humanoid.MaxHealth
+        end
+    end
+end)
+
+-- Highlight
+RunService.RenderStepped:Connect(function()
+    if settings.highlight then
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl~=LocalPlayer and pl.Character and isAlive(pl.Character) then
+                if settings.teamCheck and pl.Team==LocalPlayer.Team then
+                    if highlights[pl] then highlights[pl]:Destroy() highlights[pl]=nil end
+                else
+                    if not highlights[pl] then
+                        local hl = Instance.new("Highlight")
+                        hl.Parent = pl.Character
+                        hl.FillColor = settings.highlightColor
+                        hl.OutlineColor = settings.highlightColor
+                        highlights[pl]=hl
+                    else
+                        highlights[pl].FillColor = settings.highlightColor
+                        highlights[pl].OutlineColor = settings.highlightColor
+                    end
+                end
+            end
+        end
+    else
+        for _, hl in pairs(highlights) do hl:Destroy() end
+        highlights = {}
+    end
+end)
+
+-- ===== Bunny Hop – Continuous Forward Jump =====
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Space then
+        spaceHeld = true
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Space then
+        spaceHeld = false
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    local chr = LocalPlayer.Character
+    if not chr then return end
+    local hum = chr:FindFirstChild("Humanoid")
+    local hrp = chr:FindFirstChild("HumanoidRootPart")
+    if settings.bunnyHop and hum and hrp and spaceHeld then
+        -- Move forward with speed controlled by slider
+        local moveDir = hrp.CFrame.LookVector * settings.bunnyHopSpeed  -- Move based on slider speed
+        hrp.Velocity = Vector3.new(moveDir.X, hrp.Velocity.Y, moveDir.Z)
+
+        -- Auto-jump when on the ground
+        if hum.FloorMaterial ~= Enum.Material.Air then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- Lock-On Key
+UserInputService.InputBegan:Connect(function(input,processed)
+    if processed then return end
+    if settings.lockOn and (input.UserInputType==settings.lockKey or input.KeyCode==settings.lockKey) then
+        lockKeyActive=true
+    end
+end)
+UserInputService.InputEnded:Connect(function(input,processed)
+    if settings.lockOn and (input.UserInputType==settings.lockKey or input.KeyCode==settings.lockKey) then
+        lockKeyActive=false
+    end
+end)
+
+-- Lock-On + FOV + Pulse
+RunService.RenderStepped:Connect(function(dt)
+    -- Pulse FOV
+    if settings.fovCircle then
+        fovFrame.Visible=true
+        pulse = pulse + dt*2*pulseDir
+        if pulse>1.2 then pulseDir=-1 elseif pulse<0.9 then pulseDir=1 end
+        fovFrame.Size=UDim2.new(0,settings.fovSize*2*pulse,0,settings.fovSize*2*pulse)
+        fovFrame.Position=UDim2.new(0.5,0,0.5,0)
+        fovFrame.BorderColor3=settings.highlightColor
+    else
+        fovFrame.Visible=false
+    end
+
+    -- Lock-On
+    if settings.lockOn and lockKeyActive then
+        local closest=nil
+        local closestDist=math.huge
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl~=LocalPlayer and pl.Character and isAlive(pl.Character) then
+                if settings.teamCheck and pl.Team==LocalPlayer.Team then continue end
+                local head = pl.Character:FindFirstChild("Head")
+                if head then
+                    local screenPos,onScreen = Camera:WorldToViewportPoint(head.Position)
+                    if onScreen then
+                        local dx = screenPos.X - Camera.ViewportSize.X/2
+                        local dy = screenPos.Y - Camera.ViewportSize.Y/2
+                        local dist = math.sqrt(dx*dx + dy*dy)
+                        if (not settings.fovCircle) or dist<=settings.fovSize then
+                            if dist<closestDist then
+                                closestDist=dist
+                                closest=pl
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        target=closest
+    else
+        target=nil
+    end
+
+    if target and target.Character and isAlive(target.Character) then
+        local head = target.Character:FindFirstChild("Head")
+        if head then
+            local camPos = Camera.CFrame.Position
+            local goal = CFrame.new(camPos,head.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(goal,settings.camLerpSpeed)
+        end
+    end
+end)
+
+-- ===== Open/Close GUI with Right Shift =====
+UserInputService.InputBegan:Connect(function(input,processed)
+    if input.KeyCode==Enum.KeyCode.RightShift and not processed then
+        main.Visible = not main.Visible
+        openBtn.Visible = not main.Visible
+    end
+end)
+
+print("UNIVERSAL CIGGY LOADED ✅")
