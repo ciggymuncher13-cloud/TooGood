@@ -1,35 +1,70 @@
--- UNIVERSAL CIGGY – Ultimate CounterBlox GUI
--- LocalScript in StarterPlayerScripts
-
 -- Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local Camera = Workspace.CurrentCamera
 
--- ===== State =====
+-- ===== State and New Settings =====
 local settings = {
     godmode = false,
     highlight = false,
-    highlightColor = Color3.fromRGB(0,255,0),
+    highlightColor = Color3.fromRGB(0, 255, 0),
     teamCheck = true,
+    
+    -- Movement
     bunnyHop = false,
-    bunnyHopSpeed = 50,  -- Default bunny hop speed
+    bunnyHopSpeed = 50,
+    fly = false, 
+    speedHack = false, 
+    speedValue = 30, 
+    jumpPower = false, 
+    jumpValue = 100, 
+    walkOnWater = false,
+    
+    -- Combat (Aimbot/Lock-On)
     lockOn = false,
     fovCircle = false,
-    lockKey = Enum.UserInputType.MouseButton2, -- right click
+    lockKey = Enum.UserInputType.MouseButton2,
     fovSize = 150,
     camLerpSpeed = 0.25,
-    theme = Color3.fromRGB(25,25,25)
+    instantReload = false, 
+    noRecoil = false, 
+    noSpread = false, 
+    hitboxExpander = false, 
+    hitboxScale = 1.5, 
+    espHealthBar = false,
+    
+    -- Player
+    noclip = false, 
+    respawn = false, 
+    invisibility = false, 
+    fullBright = false, 
+    
+    -- Exploits
+    antiAFK = false, 
+    autoFarm = false, 
+    teleportToTarget = false, 
+    autoHeal = false, 
+    forceHighLOD = false,
+    removeViewmodel = false,
+    
+    -- Theme
+    theme = Color3.fromRGB(25, 25, 25)
 }
 
 local target = nil
 local highlights = {}
 local spaceHeld = false
 local lockKeyActive = false
+local originalWalkspeed = 16
+local originalJumpPower = 50
+local originalFov = Camera.FieldOfView
+local hitboxExpandedParts = {} -- To track expanded parts for resizing back
 
 -- ===== Utility Functions =====
 local function isAlive(char)
@@ -44,7 +79,7 @@ local function makeUICorner(inst, radius)
 end
 
 local function addHoverEffect(btn, hoverColor)
-    hoverColor = hoverColor or Color3.fromRGB(0,255,0)
+    hoverColor = hoverColor or Color3.fromRGB(0, 255, 0)
     local originalColor = btn.BackgroundColor3
     btn.MouseEnter:Connect(function()
         TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = hoverColor}):Play()
@@ -54,7 +89,111 @@ local function addHoverEffect(btn, hoverColor)
     end)
 end
 
--- ===== GUI Setup =====
+-- Function to set properties on a humanoid, safely handling character re-spawn
+local function updateHumanoidProperties()
+    local chr = LocalPlayer.Character
+    if not chr then return end
+    local hum = chr:FindFirstChildOfClass("Humanoid")
+    if hum then
+        -- Speed Hack
+        hum.WalkSpeed = settings.speedHack and settings.speedValue or originalWalkspeed
+        
+        -- Jump Power
+        hum.JumpPower = settings.jumpPower and settings.jumpValue or originalJumpPower
+    end
+end
+
+-- Set original values on first run
+local chr = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local hum = chr:FindFirstChildOfClass("Humanoid")
+if hum then
+    originalWalkspeed = hum.WalkSpeed
+    originalJumpPower = hum.JumpPower
+end
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    newChar:WaitForChild("Humanoid").WalkSpeed = settings.speedHack and settings.speedValue or originalWalkspeed
+    newChar:WaitForChild("Humanoid").JumpPower = settings.jumpPower and settings.jumpValue or originalJumpPower
+end)
+
+-- Fullbright Toggle Implementation
+local function toggleFullBright(v)
+    settings.fullBright = v
+    if v then
+        Lighting.Brightness = 5
+        Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+    else
+        -- Attempt to reset to a neutral state (or save/load original Lighting settings if needed)
+        Lighting.Brightness = 1 
+        Lighting.OutdoorAmbient = Color3.new(0, 0, 0) 
+    end
+end
+
+-- Invisibility Toggle Implementation
+local function toggleInvisibility(v)
+    settings.invisibility = v
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.LocalTransparencyModifier = settings.invisibility and 1 or 0
+            end
+        end
+    end
+end
+
+-- Viewmodel Toggle Implementation
+local function toggleViewmodel(v)
+    settings.removeViewmodel = v
+    local char = LocalPlayer.Character
+    if char then
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then
+            for _, descendant in ipairs(tool:GetDescendants()) do
+                if descendant:IsA("BasePart") or descendant:IsA("MeshPart") then
+                    descendant.LocalTransparencyModifier = v and 1 or 0
+                end
+            end
+        end
+    end
+end
+
+-- Hitbox Expander/Contractor
+local function toggleHitboxExpander(v)
+    settings.hitboxExpander = v
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    if v then
+        -- Expand hitboxes
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide and not part.Name:match("RootPart") then
+                local originalSize = part.Size
+                hitboxExpandedParts[part] = originalSize
+                part.Size = originalSize * settings.hitboxScale
+            end
+        end
+    else
+        -- Restore original sizes
+        for part, originalSize in pairs(hitboxExpandedParts) do
+            if part.Parent and part.Parent:IsA("Model") then
+                part.Size = originalSize
+            end
+        end
+        hitboxExpandedParts = {}
+    end
+end
+
+-- Connect the character's tool handling to the viewmodel toggle
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") and settings.removeViewmodel then
+            toggleViewmodel(true)
+        end
+    end)
+end)
+
+
+-- ===== GUI Setup (Fixed Layout) =====
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "UNIVERSAL_CIGGY"
 screenGui.ResetOnSpawn = false
@@ -70,10 +209,11 @@ openBtn.Text = "CIGGY"
 openBtn.Font = Enum.Font.SourceSansBold
 openBtn.TextScaled = true
 openBtn.Parent = screenGui
+makeUICorner(openBtn, 8)
 
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 700, 0, 900)
-main.Position = UDim2.new(0.5, -350, 0.5, -450)
+main.Size = UDim2.new(0, 700, 0, 550) 
+main.Position = UDim2.new(0.5, -350, 0.5, -275) 
 main.BackgroundColor3 = settings.theme
 main.Visible = false
 main.Parent = screenGui
@@ -81,15 +221,14 @@ makeUICorner(main, 16)
 
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 60)
-titleBar.BackgroundColor3 = Color3.fromRGB(35,35,35)
+titleBar.BackgroundColor3 = settings.theme:lerp(Color3.fromRGB(0, 0, 0), 0.8)
 titleBar.Parent = main
-makeUICorner(titleBar, 12)
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,0,1,0)
+title.Size = UDim2.new(1, 0, 1, 0)
 title.BackgroundTransparency = 1
-title.Text = "UNIVERSAL CIGGY"
-title.TextColor3 = Color3.fromRGB(0,255,0)
+title.Text = "UNIVERSAL CIGGY - BETA SRRY!"
+title.TextColor3 = Color3.fromRGB(0, 255, 0)
 title.Font = Enum.Font.SourceSansBold
 title.TextScaled = true
 title.Parent = titleBar
@@ -97,13 +236,13 @@ title.Parent = titleBar
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 80, 0, 40)
 closeBtn.Position = UDim2.new(1, -90, 0, 10)
-closeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 closeBtn.Text = "Close"
-closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBtn.Font = Enum.Font.SourceSans
 closeBtn.TextSize = 18
 closeBtn.Parent = titleBar
-makeUICorner(closeBtn,8)
+makeUICorner(closeBtn, 8)
 
 closeBtn.MouseButton1Click:Connect(function()
     main.Visible = false
@@ -118,165 +257,258 @@ end)
 -- Tab bar
 local tabBar = Instance.new("Frame")
 tabBar.Size = UDim2.new(1, 0, 0, 50)
-tabBar.Position = UDim2.new(0,0,0,60)
-tabBar.BackgroundColor3 = Color3.fromRGB(30,30,30)
+tabBar.Position = UDim2.new(0, 0, 0, 60)
+tabBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 tabBar.Parent = main
-makeUICorner(tabBar,12)
 
-local tabs = {"Basic","Movement","Lock-On","Theme","Highlight Colors"}
+local tabs = {"Basic", "Movement", "Lock-On", "Combat", "Player", "Exploits", "Theme", "Highlight Colors"}
 local tabButtons = {}
 local contentFrames = {}
 
 for i, tName in ipairs(tabs) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0,150,0,40)
-    btn.Position = UDim2.new(0,20+(i-1)*160,0,5)
-    btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    btn.Size = UDim2.new(0, 78, 0, 40) 
+    btn.Position = UDim2.new(0, 5 + (i - 1) * 85, 0, 5) 
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     btn.Text = tName
-    btn.TextColor3 = Color3.fromRGB(200,200,200)
+    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
     btn.Font = Enum.Font.SourceSansSemibold
-    btn.TextSize = 18
+    btn.TextSize = 14 
     btn.Parent = tabBar
-    makeUICorner(btn,8)
+    makeUICorner(btn, 8)
     addHoverEffect(btn)
-    table.insert(tabButtons,btn)
+    table.insert(tabButtons, btn)
 
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1,-40,1,-120)
-    frame.Position = UDim2.new(0,20,0,120)
+    frame.Size = UDim2.new(1, -20, 1, -120) 
+    frame.Position = UDim2.new(0, 10, 0, 120) 
     frame.BackgroundTransparency = 1
     frame.Visible = false
     frame.Parent = main
-    table.insert(contentFrames,frame)
+    
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Vertical
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    layout.VerticalAlignment = Enum.VerticalAlignment.Top
+    layout.Padding = UDim.new(0, 5) 
+    layout.Parent = frame
+    
+    table.insert(contentFrames, frame)
 
     btn.MouseButton1Click:Connect(function()
-        for j,f in ipairs(contentFrames) do f.Visible = (j==i) end
-        for j,b in ipairs(tabButtons) do
-            b.BackgroundColor3 = (j==i) and Color3.fromRGB(0,180,0) or Color3.fromRGB(50,50,50)
+        for j, f in ipairs(contentFrames) do f.Visible = (j == i) end
+        for j, b in ipairs(tabButtons) do
+            b.BackgroundColor3 = (j == i) and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(50, 50, 50)
         end
     end)
 end
 
-tabButtons[1].BackgroundColor3 = Color3.fromRGB(0,180,0)
+tabButtons[1].BackgroundColor3 = Color3.fromRGB(0, 180, 0)
 contentFrames[1].Visible = true
 
--- ===== GUI Element Helpers =====
-local function makeToggle(parent,labelText,stateRef)
+-- ===== GUI Element Helpers (Using UIListLayout) =====
+local function makeToggle(parent, labelText, stateRef, onToggleCallback)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0,200,0,40)
-    btn.Position = UDim2.new(0,0,0,#parent:GetChildren()*45)
-    btn.BackgroundColor3 = Color3.fromRGB(70,70,70)
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.Size = UDim2.new(0, 200, 0, 40)
+    btn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.SourceSans
     btn.TextSize = 18
-    btn.Text = labelText..": OFF"
+    btn.Text = labelText .. ": OFF"
     btn.Parent = parent
-    makeUICorner(btn,8)
+    makeUICorner(btn, 8)
     addHoverEffect(btn)
 
     local state = false
     btn.MouseButton1Click:Connect(function()
         state = not state
-        btn.Text = labelText..(state and ": ON" or ": OFF")
+        btn.Text = labelText .. (state and ": ON" or ": OFF")
         stateRef(state)
+        
+        if onToggleCallback then
+            onToggleCallback(state)
+        end
     end)
 end
 
-local function makeSlider(parent,labelText,min,max,initial,callback)
+local function makeSlider(parent, labelText, min, max, initial, callback)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0,300,0,50)
+    frame.Size = UDim2.new(0.5, 0, 0, 50) 
     frame.BackgroundTransparency = 1
-    frame.Position = UDim2.new(0,0,0,#parent:GetChildren()*55)
     frame.Parent = parent
 
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1,0,0,20)
-    lbl.Position = UDim2.new(0,0,0,0)
+    lbl.Size = UDim2.new(1, 0, 0, 20)
+    lbl.Position = UDim2.new(0, 0, 0, 0)
     lbl.BackgroundTransparency = 1
-    lbl.Text = labelText..": "..initial
-    lbl.TextColor3 = Color3.fromRGB(200,200,200)
+    lbl.Text = labelText .. ": " .. string.format("%.1f", initial)
+    lbl.TextColor3 = Color3.fromRGB(200, 200, 200)
     lbl.Font = Enum.Font.SourceSans
     lbl.TextSize = 16
     lbl.Parent = frame
 
     local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(0,200,0,8)
-    bar.Position = UDim2.new(0,0,0,25)
-    bar.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    bar.Size = UDim2.new(1, 0, 0, 8) 
+    bar.Position = UDim2.new(0, 0, 0, 25)
+    bar.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     bar.Parent = frame
-    makeUICorner(bar,4)
+    makeUICorner(bar, 4)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.new(0,12,0,12)
-    knob.BackgroundColor3 = Color3.fromRGB(0,255,0)
-    knob.Position = UDim2.new((initial-min)/(max-min),0,0,-2)
+    knob.Size = UDim2.new(0, 12, 0, 12)
+    knob.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    knob.Position = UDim2.new((initial - min) / (max - min), 0, 0, -2)
     knob.Parent = bar
-    makeUICorner(knob,6)
+    makeUICorner(knob, 6)
+    
+    local value = initial
 
     local dragging = false
     knob.InputBegan:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType==Enum.UserInputType.MouseMovement then
-            local rel = math.clamp(input.Position.X - bar.AbsolutePosition.X,0,bar.AbsoluteSize.X)
-            local val = min + (rel/bar.AbsoluteSize.X)*(max-min)
-            callback(val)
-            lbl.Text = labelText..": "..string.format("%.1f",val)
-            knob.Position = UDim2.new(rel/bar.AbsoluteSize.X,0,0,-2)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local rel = math.clamp(input.Position.X - bar.AbsolutePosition.X, 0, bar.AbsoluteSize.X)
+            value = min + (rel / bar.AbsoluteSize.X) * (max - min)
+            
+            -- Rounding 
+            local roundedValue = math.floor(value * 10) / 10 
+            
+            callback(roundedValue)
+            lbl.Text = labelText .. ": " .. string.format("%.1f", roundedValue)
+            knob.Position = UDim2.new(rel / bar.AbsoluteSize.X, 0, 0, -2)
         end
     end)
     knob.InputEnded:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+            dragging = false 
+            -- Re-run relevant property update on stop
+            if labelText:match("Speed Hack Value") or labelText:match("Jump Power Value") then
+                updateHumanoidProperties()
+            end
+            if labelText:match("Hitbox Scale") then
+                -- Re-apply expander with new scale
+                toggleHitboxExpander(false)
+                toggleHitboxExpander(settings.hitboxExpander)
+            end
+        end
     end)
 end
 
--- ===== Tabs Content =====
--- Basic
-makeToggle(contentFrames[1],"Godmode",function(v) settings.godmode=v end)
-makeToggle(contentFrames[1],"Highlight",function(v) settings.highlight=v end)
-makeToggle(contentFrames[1],"Team Check",function(v) settings.teamCheck=v end)
+-- ===== Tabs Content (Now Auto-Layouted) =====
 
--- Movement
-makeToggle(contentFrames[2],"Bunny Hop",function(v) settings.bunnyHop=v end)
-makeSlider(contentFrames[2],"Bunny Hop Speed",30,100,settings.bunnyHopSpeed,function(v) settings.bunnyHopSpeed=v end)
+-- Basic (ContentFrames[1])
+makeToggle(contentFrames[1], "Godmode", function(v) settings.godmode = v end)
+makeToggle(contentFrames[1], "Highlight", function(v) settings.highlight = v end)
+makeToggle(contentFrames[1], "Team Check", function(v) settings.teamCheck = v end)
+makeToggle(contentFrames[1], "Fullbright", toggleFullBright)
 
--- Lock-On
-makeToggle(contentFrames[3],"Lock-On",function(v) settings.lockOn=v end)
-makeToggle(contentFrames[3],"Show FOV",function(v) settings.fovCircle=v end)
-makeSlider(contentFrames[3],"FOV Radius",50,500,settings.fovSize,function(v) settings.fovSize=v end)
-makeSlider(contentFrames[3],"Cam Speed",0.05,1,settings.camLerpSpeed,function(v) settings.camLerpSpeed=v end)
+local spectatorLabel = Instance.new("TextLabel")
+spectatorLabel.Size = UDim2.new(0, 250, 0, 120)
+spectatorLabel.BackgroundTransparency = 1
+spectatorLabel.Text = "Spectators:\nNone"
+spectatorLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+spectatorLabel.Font = Enum.Font.SourceSansBold
+spectatorLabel.TextSize = 18
+spectatorLabel.TextXAlignment = Enum.TextXAlignment.Left
+spectatorLabel.TextYAlignment = Enum.TextYAlignment.Top
+spectatorLabel.Parent = contentFrames[1]
 
--- Theme Tab (GUI)
+-- Movement (ContentFrames[2])
+makeToggle(contentFrames[2], "Bunny Hop", function(v) settings.bunnyHop = v end)
+makeSlider(contentFrames[2], "Bunny Hop Speed", 5, 100, settings.bunnyHopSpeed, function(v) settings.bunnyHopSpeed = v end)
+makeToggle(contentFrames[2], "Fly", function(v) settings.fly = v end)
+makeToggle(contentFrames[2], "Speed Hack", function(v) settings.speedHack = v updateHumanoidProperties() end)
+makeSlider(contentFrames[2], "Speed Hack Value", 16, 100, settings.speedValue, function(v) settings.speedValue = v end)
+makeToggle(contentFrames[2], "Jump Power", function(v) settings.jumpPower = v updateHumanoidProperties() end)
+makeSlider(contentFrames[2], "Jump Power Value", 50, 250, settings.jumpValue, function(v) settings.jumpValue = v end)
+makeToggle(contentFrames[2], "Walk on Water", function(v) settings.walkOnWater = v end)
+
+
+-- Lock-On (ContentFrames[3])
+makeToggle(contentFrames[3], "Lock-On", function(v) settings.lockOn = v end)
+makeToggle(contentFrames[3], "Show FOV", function(v) settings.fovCircle = v end)
+makeSlider(contentFrames[3], "FOV Radius", 50, 500, settings.fovSize, function(v) settings.fovSize = v end)
+makeSlider(contentFrames[3], "Cam Speed", 0.05, 1, settings.camLerpSpeed, function(v) settings.camLerpSpeed = v end)
+
+-- Combat (ContentFrames[4] - NEW Tab)
+makeToggle(contentFrames[4], "Instant Reload", function(v) settings.instantReload = v end)
+makeToggle(contentFrames[4], "No Recoil", function(v) settings.noRecoil = v end)
+makeToggle(contentFrames[4], "No Spread", function(v) settings.noSpread = v end)
+makeToggle(contentFrames[4], "Hitbox Expander", toggleHitboxExpander)
+makeSlider(contentFrames[4], "Hitbox Scale", 1, 5, settings.hitboxScale, function(v) settings.hitboxScale = v end)
+makeToggle(contentFrames[4], "ESP Health Bar", function(v) settings.espHealthBar = v end)
+
+-- Player (ContentFrames[5] - NEW Tab)
+makeToggle(contentFrames[5], "No Clip", function(v) settings.noclip = v end)
+makeToggle(contentFrames[5], "Auto Respawn", function(v) settings.respawn = v end)
+makeToggle(contentFrames[5], "Invisibility", toggleInvisibility)
+makeToggle(contentFrames[5], "Teleport to Target", function(v) settings.teleportToTarget = v end)
+
+-- Exploits (ContentFrames[6] - NEW Tab)
+makeToggle(contentFrames[6], "Anti-AFK", function(v) settings.antiAFK = v end)
+makeToggle(contentFrames[6], "Camera FOV Mod", function(v) 
+    if v then
+        Camera.FieldOfView = 120
+    else
+        Camera.FieldOfView = originalFov
+    end
+end)
+makeToggle(contentFrames[6], "Auto Heal", function(v) settings.autoHeal = v end)
+makeToggle(contentFrames[6], "Force High LOD", function(v) 
+    settings.forceHighLOD = v
+    -- This relies on game setting attributes, may not work on all games.
+    if settings.forceHighLOD then
+        if game:IsService("ReplicatedStorage") then
+             game:GetService("ReplicatedStorage"):SetAttribute("HighDetailEnabled", true)
+        end
+    end
+end)
+makeToggle(contentFrames[6], "Remove Viewmodel", toggleViewmodel)
+makeToggle(contentFrames[6], "Auto Farm", function(v)
+    settings.autoFarm = v
+    _G.farm2 = v
+end)
+
+-- Theme (ContentFrames[7])
+local colorGrid = Instance.new("UIGridLayout")
+colorGrid.CellSize = UDim2.new(0, 60, 0, 40)
+colorGrid.CellPadding = UDim2.new(0, 5, 0, 5)
+colorGrid.Parent = contentFrames[7]
+
 local colorValues = {
-    Color3.fromRGB(25,25,25), Color3.fromRGB(230,230,230), Color3.fromRGB(20,40,20), Color3.fromRGB(50,0,50),
-    Color3.fromRGB(0,50,50), Color3.fromRGB(100,50,0), Color3.fromRGB(255,0,0), Color3.fromRGB(0,0,255),
-    Color3.fromRGB(0,255,0), Color3.fromRGB(255,255,0), Color3.fromRGB(255,0,255), Color3.fromRGB(0,255,255)
+    Color3.fromRGB(25, 25, 25), Color3.fromRGB(230, 230, 230), Color3.fromRGB(20, 40, 20), Color3.fromRGB(50, 0, 50),
+    Color3.fromRGB(0, 50, 50), Color3.fromRGB(100, 50, 0), Color3.fromRGB(255, 0, 0), Color3.fromRGB(0, 0, 255),
+    Color3.fromRGB(0, 255, 0), Color3.fromRGB(255, 255, 0), Color3.fromRGB(255, 0, 255), Color3.fromRGB(0, 255, 255)
 }
-for i, c in ipairs(colorValues) do
+for _, c in ipairs(colorValues) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0,60,0,40)
-    btn.Position = UDim2.new(0,(i-1)*65,0,0)
+    btn.Size = UDim2.new(0, 60, 0, 40)
     btn.BackgroundColor3 = c
     btn.Text = ""
-    btn.Parent = contentFrames[4]
-    makeUICorner(btn,6)
+    btn.Parent = contentFrames[7]
+    makeUICorner(btn, 6)
     addHoverEffect(btn)
     btn.MouseButton1Click:Connect(function()
         main.BackgroundColor3 = c
-        titleBar.BackgroundColor3 = c:lerp(Color3.fromRGB(0,0,0),0.8)
+        titleBar.BackgroundColor3 = c:lerp(Color3.fromRGB(0, 0, 0), 0.8)
     end)
 end
 
--- Highlight Colors
-for i, c in ipairs(colorValues) do
+-- Highlight Colors (ContentFrames[8])
+local highlightGrid = Instance.new("UIGridLayout")
+highlightGrid.CellSize = UDim2.new(0, 60, 0, 40)
+highlightGrid.CellPadding = UDim2.new(0, 5, 0, 5)
+highlightGrid.Parent = contentFrames[8]
+
+for _, c in ipairs(colorValues) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0,60,0,40)
-    btn.Position = UDim2.new(0,(i-1)*65,0,0)
+    btn.Size = UDim2.new(0, 60, 0, 40)
     btn.BackgroundColor3 = c
     btn.Text = ""
-    btn.Parent = contentFrames[5]
-    makeUICorner(btn,6)
+    btn.Parent = contentFrames[8]
+    makeUICorner(btn, 6)
     addHoverEffect(btn)
     btn.MouseButton1Click:Connect(function()
         settings.highlightColor = c
@@ -284,63 +516,210 @@ for i, c in ipairs(colorValues) do
             hl.FillColor = c
             hl.OutlineColor = c
         end
+        fovFrame.BorderColor3 = c
     end)
 end
 
 -- ===== FOV Circle =====
 local fovFrame = Instance.new("Frame")
-fovFrame.Size = UDim2.new(0, settings.fovSize*2,0,settings.fovSize*2)
-fovFrame.AnchorPoint = Vector2.new(0.5,0.5)
-fovFrame.Position = UDim2.new(0.5,0,0.5,0)
+fovFrame.Size = UDim2.new(0, settings.fovSize * 2, 0, settings.fovSize * 2)
+fovFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+fovFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 fovFrame.BackgroundTransparency = 1
 fovFrame.BorderSizePixel = 3
 fovFrame.BorderColor3 = settings.highlightColor
 fovFrame.Visible = false
 fovFrame.Parent = screenGui
-makeUICorner(fovFrame,settings.fovSize)
+makeUICorner(fovFrame, settings.fovSize)
 
 local pulse = 1
 local pulseDir = 1
 
--- ===== Game Logic =====
--- Godmode
-RunService.RenderStepped:Connect(function()
-    if settings.godmode then
-        local chr = LocalPlayer.Character
-        if isAlive(chr) then
-            chr.Humanoid.Health = chr.Humanoid.MaxHealth
+-- Spectator Detection Function
+local function getSpectators()
+    local spectating = {}
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local cam = Workspace.CurrentCamera
+
+            -- Find what the OTHER PLAYER is spectating
+            local subject = nil
+
+            -- Check their character camera subject (works in most games)
+            pcall(function()
+                subject = plr.CameraSubject or cam.CameraSubject
+            end)
+
+            if subject and subject.Parent == LocalPlayer.Character then
+                table.insert(spectating, plr.Name)
+            end
         end
     end
-end)
 
--- Highlight
-RunService.RenderStepped:Connect(function()
-    if settings.highlight then
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if pl~=LocalPlayer and pl.Character and isAlive(pl.Character) then
-                if settings.teamCheck and pl.Team==LocalPlayer.Team then
-                    if highlights[pl] then highlights[pl]:Destroy() highlights[pl]=nil end
-                else
-                    if not highlights[pl] then
-                        local hl = Instance.new("Highlight")
-                        hl.Parent = pl.Character
-                        hl.FillColor = settings.highlightColor
-                        hl.OutlineColor = settings.highlightColor
-                        highlights[pl]=hl
-                    else
-                        highlights[pl].FillColor = settings.highlightColor
-                        highlights[pl].OutlineColor = settings.highlightColor
+    return spectating
+end
+
+
+-- ===== Game Logic Loop (RenderStepped/Tasks) =====
+_G.globalTarget = nil -- Global target for AutoFarm
+
+-- Auto Farm: Target Selection
+local function getNearestEnemy(position)
+    local nearest, dist = nil, 99999
+    
+    local function checkContainer(container)
+        if container then
+            for _, v in pairs(container:GetChildren()) do
+                if v:IsA("Model") and v:FindFirstChild("Head") and isAlive(v) then
+                    local m = (position - v.Head.Position).Magnitude
+                    if m < dist then
+                        dist = m
+                        nearest = v
                     end
                 end
             end
         end
-    else
-        for _, hl in pairs(highlights) do hl:Destroy() end
-        highlights = {}
+    end
+
+    -- Check common enemy containers (assumed existence for the script to function)
+    checkContainer(Workspace:FindFirstChild("BossFolder"))
+    checkContainer(Workspace:FindFirstChild("Enemies"))
+    checkContainer(Workspace:FindFirstChild("enemies"))
+
+    return nearest
+end
+
+
+-- Godmode / Auto Respawn / Auto Heal / Fly / Noclip / Walk on Water
+RunService.RenderStepped:Connect(function(dt)
+    local chr = LocalPlayer.Character
+    if not chr then 
+        if settings.respawn then LocalPlayer:LoadCharacter() end
+        return
+    end
+    local hum = chr:FindFirstChild("Humanoid")
+    local hrp = chr:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp then return end
+
+    -- Godmode/AutoHeal
+    if settings.godmode then
+        hum.Health = hum.MaxHealth
+    elseif settings.autoHeal and hum.Health < hum.MaxHealth then
+        hum.Health = math.min(hum.Health + 2, hum.MaxHealth)
+    end
+
+    -- No Clip
+    hrp.CanCollide = not settings.noclip
+
+    -- Walk on Water
+    if settings.walkOnWater then
+        if hum.FloorMaterial == Enum.Material.Water then
+            hum.PlatformStand = true
+            hrp.CFrame = hrp.CFrame + Vector3.new(0, 0.5, 0) 
+        elseif hum.PlatformStand and hum.FloorMaterial ~= Enum.Material.Water then
+            hum.PlatformStand = false
+        end
+    end
+    
+    -- Fly
+    if settings.fly then
+        hum.PlatformStand = true -- Use PlatformStand for better control than Sit
+        local speed = 25
+        local moveVector = Vector3.new(0, 0, 0)
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveVector = moveVector + Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveVector = moveVector - Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveVector = moveVector - Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveVector = moveVector + Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveVector = moveVector + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveVector = moveVector - Vector3.new(0, 1, 0) end
+        
+        if moveVector.Magnitude > 0 then
+            hrp.CFrame = hrp.CFrame + moveVector.unit * speed * dt
+        end
+    elseif hum.PlatformStand and not settings.walkOnWater then
+        hum.PlatformStand = false
     end
 end)
 
--- ===== Bunny Hop – Continuous Forward Jump =====
+-- Anti AFK (Separate Task to avoid frame rate dependency)
+task.spawn(function()
+    while true do
+        task.wait(5) -- Wait longer to be subtle
+        if settings.antiAFK then
+            UserInputService:SimulateKeyPress(Enum.KeyCode.W)
+            task.wait(0.1)
+            UserInputService:SimulateKeyRelease(Enum.KeyCode.W)
+        end
+    end
+end)
+
+
+-- Auto Farm movement + aim
+RunService.RenderStepped:Connect(function()
+    if settings.autoFarm and _G.farm2 == true and LocalPlayer.Character then
+        local target = getNearestEnemy(LocalPlayer.Character.Head.Position)
+        if target and target:FindFirstChild("Head") and target:FindFirstChild("HumanoidRootPart") then
+            -- Aim
+            Workspace.CurrentCamera.CFrame =
+                CFrame.new(Workspace.CurrentCamera.CFrame.Position, target.Head.Position)
+
+            -- Movement (Close proximity)
+            LocalPlayer.Character.HumanoidRootPart.CFrame =
+                target.HumanoidRootPart.CFrame * CFrame.new(0, 8, 9)
+
+            _G.globalTarget = target
+        else
+            _G.globalTarget = nil
+        end
+    end
+end)
+
+-- Auto Farm Velocity Reset
+task.spawn(function()
+    while true do
+        task.wait()
+        if settings.autoFarm and LocalPlayer.Character then
+            local chr = LocalPlayer.Character
+            if chr:FindFirstChild("HumanoidRootPart") then
+                chr.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+                chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
+
+-- Auto Farm Shooting (Simulated RemoteEvent)
+task.spawn(function()
+    while true do
+        task.wait() -- Adjust this for desired firing rate
+
+        if (settings.autoFarm
+            and _G.farm2 == true
+            and _G.globalTarget
+            and _G.globalTarget:FindFirstChild("Head")
+            and LocalPlayer.Character:FindFirstChildOfClass("Tool")) then
+
+            local gunName = LocalPlayer.Character:FindFirstChildOfClass("Tool").Name
+            local tgtHead = _G.globalTarget.Head
+
+            -- Assuming the game uses a specific RemoteEvent structure for firing (as per original script)
+            if game.ReplicatedStorage:FindFirstChild("Gun") and game.ReplicatedStorage.Gun:IsA("RemoteEvent") then
+                game.ReplicatedStorage.Gun:FireServer({
+                    ["Normal"] = Vector3.new(0, 0, 0),
+                    ["Direction"] = tgtHead.Position,
+                    ["Name"] = gunName,
+                    ["Hit"] = tgtHead,
+                    ["Origin"] = tgtHead.Position,
+                    ["Pos"] = tgtHead.Position
+                })
+            end
+        end
+    end
+end)
+
+
+-- Bunny Hop Input Handling
 UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.Space then
         spaceHeld = true
@@ -352,95 +731,173 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
+-- Bunny Hop Logic
 RunService.RenderStepped:Connect(function()
     local chr = LocalPlayer.Character
     if not chr then return end
     local hum = chr:FindFirstChild("Humanoid")
     local hrp = chr:FindFirstChild("HumanoidRootPart")
+    
     if settings.bunnyHop and hum and hrp and spaceHeld then
-        -- Move forward with speed controlled by slider
-        local moveDir = hrp.CFrame.LookVector * settings.bunnyHopSpeed  -- Move based on slider speed
+        -- Apply directional force/velocity
+        local moveDir = hrp.CFrame.LookVector * settings.bunnyHopSpeed 
         hrp.Velocity = Vector3.new(moveDir.X, hrp.Velocity.Y, moveDir.Z)
 
-        -- Auto-jump when on the ground
         if hum.FloorMaterial ~= Enum.Material.Air then
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
         end
     end
 end)
 
--- Lock-On Key
-UserInputService.InputBegan:Connect(function(input,processed)
+-- Lock-On Key and Teleport Input Handling
+UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
-    if settings.lockOn and (input.UserInputType==settings.lockKey or input.KeyCode==settings.lockKey) then
-        lockKeyActive=true
+    
+    -- Lock Key
+    if settings.lockOn and (input.UserInputType == settings.lockKey or input.KeyCode == settings.lockKey) then
+        lockKeyActive = true
+    end
+    
+    -- Teleport to Target trigger (LControl)
+    if settings.teleportToTarget and input.KeyCode == Enum.KeyCode.LeftControl then
+        if target and target.Character and target.Character:FindFirstChild("Head") then
+            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.CFrame = target.Character.Head.CFrame * CFrame.new(0, 0, -5) -- Teleport 5 studs behind target
+                -- Optional: settings.teleportToTarget = false 
+            end
+        end
     end
 end)
-UserInputService.InputEnded:Connect(function(input,processed)
-    if settings.lockOn and (input.UserInputType==settings.lockKey or input.KeyCode==settings.lockKey) then
-        lockKeyActive=false
+UserInputService.InputEnded:Connect(function(input, processed)
+    if settings.lockOn and (input.UserInputType == settings.lockKey or input.KeyCode == settings.lockKey) then
+        lockKeyActive = false
     end
 end)
 
--- Lock-On + FOV + Pulse
+-- Lock-On, FOV, and Pulse Logic
 RunService.RenderStepped:Connect(function(dt)
     -- Pulse FOV
     if settings.fovCircle then
-        fovFrame.Visible=true
-        pulse = pulse + dt*2*pulseDir
-        if pulse>1.2 then pulseDir=-1 elseif pulse<0.9 then pulseDir=1 end
-        fovFrame.Size=UDim2.new(0,settings.fovSize*2*pulse,0,settings.fovSize*2*pulse)
-        fovFrame.Position=UDim2.new(0.5,0,0.5,0)
-        fovFrame.BorderColor3=settings.highlightColor
+        fovFrame.Visible = true
+        pulse = pulse + dt * 2 * pulseDir
+        if pulse > 1.2 then pulseDir = -1 elseif pulse < 0.9 then pulseDir = 1 end
+        fovFrame.Size = UDim2.new(0, settings.fovSize * 2 * pulse, 0, settings.fovSize * 2 * pulse)
+        fovFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+        fovFrame.BorderColor3 = settings.highlightColor
     else
-        fovFrame.Visible=false
+        fovFrame.Visible = false
     end
 
-    -- Lock-On
+    -- Lock-On Target Finding
     if settings.lockOn and lockKeyActive then
-        local closest=nil
-        local closestDist=math.huge
+        local closest = nil
+        local closestDist = math.huge
         for _, pl in ipairs(Players:GetPlayers()) do
-            if pl~=LocalPlayer and pl.Character and isAlive(pl.Character) then
-                if settings.teamCheck and pl.Team==LocalPlayer.Team then continue end
+            if pl ~= LocalPlayer and pl.Character and isAlive(pl.Character) then
+                if settings.teamCheck and pl.Team == LocalPlayer.Team then continue end
                 local head = pl.Character:FindFirstChild("Head")
                 if head then
-                    local screenPos,onScreen = Camera:WorldToViewportPoint(head.Position)
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
                     if onScreen then
-                        local dx = screenPos.X - Camera.ViewportSize.X/2
-                        local dy = screenPos.Y - Camera.ViewportSize.Y/2
-                        local dist = math.sqrt(dx*dx + dy*dy)
-                        if (not settings.fovCircle) or dist<=settings.fovSize then
-                            if dist<closestDist then
-                                closestDist=dist
-                                closest=pl
+                        local dx = screenPos.X - Camera.ViewportSize.X / 2
+                        local dy = screenPos.Y - Camera.ViewportSize.Y / 2
+                        local dist = math.sqrt(dx * dx + dy * dy)
+                        if (not settings.fovCircle) or dist <= settings.fovSize then
+                            if dist < closestDist then
+                                closestDist = dist
+                                closest = pl
                             end
                         end
                     end
                 end
             end
         end
-        target=closest
+        target = closest
     else
-        target=nil
+        target = nil
     end
 
+    -- Lock-On Camera Aim
     if target and target.Character and isAlive(target.Character) then
         local head = target.Character:FindFirstChild("Head")
         if head then
             local camPos = Camera.CFrame.Position
-            local goal = CFrame.new(camPos,head.Position)
-            Camera.CFrame = Camera.CFrame:Lerp(goal,settings.camLerpSpeed)
+            local goal = CFrame.new(camPos, head.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(goal, settings.camLerpSpeed)
         end
     end
 end)
 
--- ===== Open/Close GUI with Right Shift =====
-UserInputService.InputBegan:Connect(function(input,processed)
-    if input.KeyCode==Enum.KeyCode.RightShift and not processed then
-        main.Visible = not main.Visible
-        openBtn.Visible = not main.Visible
+-- Highlight and ESP Logic
+task.spawn(function()
+    while true do
+        task.wait(0.005)
+
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                local char = plr.Character
+                local alive = char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0
+                local isTeamMate = settings.teamCheck and plr.Team == LocalPlayer.Team
+
+                if not isTeamMate then
+                    -- Highlight logic
+                    if settings.highlight and alive then
+                        if not highlights[plr] then
+                            local hl = Instance.new("Highlight")
+                            hl.Parent = char
+                            hl.FillColor = settings.highlightColor
+                            hl.OutlineColor = settings.highlightColor
+                            highlights[plr] = hl
+                        else
+                            highlights[plr].FillColor = settings.highlightColor
+                            highlights[plr].OutlineColor = settings.highlightColor
+                            if highlights[plr].Parent ~= char then
+                                highlights[plr].Parent = char
+                            end
+                        end
+                    elseif highlights[plr] and not settings.highlight then
+                         highlights[plr]:Destroy()
+                         highlights[plr] = nil
+                    end
+
+                    -- ESP Health Bar (Visuals not created here, but logic is ready)
+                    if settings.espHealthBar and alive then
+                        local head = char:FindFirstChild("Head")
+                        local hum = char:FindFirstChild("Humanoid")
+                        if head and hum then
+                            local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 1.5, 0))
+                            if onScreen then
+                                local healthRatio = hum.Health / hum.MaxHealth
+                                -- This is where you would update/create the GUI element for the health bar
+                                -- using screenPos and healthRatio.
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Clean up highlights if highlight is disabled
+        if not settings.highlight then
+            for plr, hl in pairs(highlights) do
+                hl:Destroy()
+                highlights[plr] = nil
+            end
+        end
     end
 end)
 
-print("UNIVERSAL CIGGY LOADED ✅")
+
+-- Open/Close GUI with Right Shift
+UserInputService.InputBegan:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.RightShift and not processed then
+        main.Visible = not main.Visible
+        openBtn.Visible = not main.Visible
+        if main.Visible then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        else
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+        end
+    end
+end)
